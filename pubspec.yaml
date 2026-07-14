@@ -1,0 +1,44 @@
+name: genbio
+description: "Gen Bio Offline Reviewing App - Capstone Project"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Local database - pure offline persistence, no server
+  sqflite: ^2.3.2
+  path: ^1.9.0
+  path_provider: ^2.1.2
+
+  # Let the admin pick a PDF/PPTX/notes file from the device - offline file
+  # picker, does not require internet or any cloud storage account
+  file_picker: ^8.1.2
+
+  # Offline PDF text extraction (pure Dart/Flutter, no native binary needed)
+  # Free Syncfusion Community License covers individuals & small teams -
+  # check https://www.syncfusion.com/sales/communitylicense before shipping
+  # if your school/org grows past the free-tier limits.
+  syncfusion_flutter_pdf: ^25.1.35
+
+  # A .pptx is a zip of XML files - these two pure-Dart packages let us
+  # unzip and parse it directly, no Apache POI / cloud conversion needed.
+  archive: ^3.4.10
+  xml: ^6.5.0
+
+  # Admin password hashing - pure Dart, no native/internet dependency
+  bcrypt: ^1.1.3
+
+  provider: ^6.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
