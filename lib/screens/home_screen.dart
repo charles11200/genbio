@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/dna_helix_background.dart';
 import 'module_select_screen.dart';
 
 /// Student-facing entry point. There is no admin/login role in this app -
@@ -17,37 +18,56 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gen Bio Offline Review'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        title: const Row(
           children: [
-            const Text(
-              'Biology Review Games',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            Image(
+              image: AssetImage('assets/image.png'),
+              width: 32,
+              height: 32,
             ),
-            const SizedBox(height: 32),
-            _GameButton(
-              label: 'Timed Quiz',
-              icon: Icons.timer,
-              onTap: () => _openGame(context, 'quiz'),
-            ),
-            const SizedBox(height: 16),
-            _GameButton(
-              label: 'Matching Game',
-              icon: Icons.compare_arrows,
-              onTap: () => _openGame(context, 'matching'),
-            ),
-            const SizedBox(height: 16),
-            _GameButton(
-              label: 'Survival Mode',
-              icon: Icons.favorite,
-              onTap: () => _openGame(context, 'survival'),
-            ),
+            SizedBox(width: 8),
+            Text('Gen Bio Offline Review'),
           ],
         ),
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: DnaHelixBackground()),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '"The Effect of BioQuest Reviewing Offline App on the '
+                    'Formative Assessment Score of STEM Students in Biology"',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 32),
+                  _GameButton(
+                    label: 'Timed Quiz',
+                    icon: Icons.timer,
+                    onTap: () => _openGame(context, 'quiz'),
+                  ),
+                  const SizedBox(height: 16),
+                  _GameButton(
+                    label: 'Matching Game',
+                    icon: Icons.compare_arrows,
+                    onTap: () => _openGame(context, 'matching'),
+                  ),
+                  const SizedBox(height: 16),
+                  _GameButton(
+                    label: 'Survival Mode',
+                    icon: Icons.favorite,
+                    onTap: () => _openGame(context, 'survival'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
