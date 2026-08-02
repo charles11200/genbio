@@ -15,85 +15,110 @@ class DatabaseHelper {
     return _db!;
   }
 
+  // v2: choiceA-D became nullable - a 'pair' (matching) row has no MCQ
+  // distractors at all, rather than empty-string placeholders.
+  static const String _createQuestionsSqlV2 = '''
+    CREATE TABLE questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      moduleId INTEGER NOT NULL,
+      questionText TEXT NOT NULL,
+      correctAnswer TEXT NOT NULL,
+      choiceA TEXT,
+      choiceB TEXT,
+      choiceC TEXT,
+      choiceD TEXT,
+      source TEXT DEFAULT 'manual',
+      difficulty TEXT DEFAULT 'medium',
+      theory TEXT DEFAULT '',
+      gameMode TEXT NOT NULL,
+      questionType TEXT DEFAULT 'mcq',
+      FOREIGN KEY (moduleId) REFERENCES modules(id) ON DELETE CASCADE
+    )
+  ''';
+
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'genbio_review.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
-          CREATE TABLE admin (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            username TEXT NOT NULL,
-            passwordHash TEXT NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE topics (
+          CREATE TABLE modules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            reviewContent TEXT NOT NULL
           )
         ''');
-        await db.execute('''
-          CREATE TABLE questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            topicId INTEGER NOT NULL,
-            questionText TEXT NOT NULL,
-            correctAnswer TEXT NOT NULL,
-            choiceA TEXT NOT NULL,
-            choiceB TEXT NOT NULL,
-            choiceC TEXT NOT NULL,
-            choiceD TEXT NOT NULL,
-            source TEXT DEFAULT 'manual',
-            difficulty TEXT DEFAULT 'medium',
-            FOREIGN KEY (topicId) REFERENCES topics(id) ON DELETE CASCADE
-          )
-        ''');
+        await db.execute(_createQuestionsSqlV2);
         await db.execute('''
           CREATE TABLE attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             studentIdentifier TEXT,
             gameMode TEXT NOT NULL,
-            topicId INTEGER NOT NULL,
+            moduleId INTEGER NOT NULL,
             score INTEGER NOT NULL,
             totalItems INTEGER NOT NULL,
             timeTakenSeconds INTEGER,
             takenAt INTEGER NOT NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE question_progress (
+            questionId INTEGER PRIMARY KEY,
+            box INTEGER NOT NULL DEFAULT 1,
+            timesShown INTEGER NOT NULL DEFAULT 0,
+            timesCorrect INTEGER NOT NULL DEFAULT 0,
+            lastAnsweredAt INTEGER,
+            lastCorrect INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (questionId) REFERENCES questions(id) ON DELETE CASCADE
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // SQLite can't ALTER COLUMN to drop NOT NULL, so rebuild the
+          // table: rename old, create the new nullable-choices version,
+          // copy rows across, drop the old one. Existing quiz/survival
+          // rows are unaffected (their choices were always non-null).
+          await db.execute('ALTER TABLE questions RENAME TO questions_v1');
+          await db.execute(_createQuestionsSqlV2);
+          await db.execute('''
+            INSERT INTO questions
+              (id, moduleId, questionText, correctAnswer, choiceA, choiceB,
+               choiceC, choiceD, source, difficulty, theory, gameMode,
+               questionType)
+            SELECT
+              id, moduleId, questionText, correctAnswer, choiceA, choiceB,
+              choiceC, choiceD, source, difficulty, theory, gameMode,
+              questionType
+            FROM questions_v1
+          ''');
+          await db.execute('DROP TABLE questions_v1');
+        }
       },
     );
   }
 
-  // ---------- Admin ----------
+  // ---------- Modules ----------
 
-  Future<Map<String, dynamic>?> getAdmin() async {
+  Future<int> insertModule(Module module) async {
     final db = await database;
-    final rows = await db.query('admin', where: 'id = 1', limit: 1);
-    return rows.isEmpty ? null : rows.first;
+    final map = module.toMap()..remove('id');
+    return db.insert('modules', map);
   }
 
-  Future<void> upsertAdmin(String username, String passwordHash) async {
+  Future<List<Module>> getAllModules() async {
     final db = await database;
-    await db.insert(
-      'admin',
-      {'id': 1, 'username': username, 'passwordHash': passwordHash},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    final rows = await db.query('modules', orderBy: 'id DESC');
+    return rows.map((r) => Module.fromMap(r)).toList();
   }
 
-  // ---------- Topics ----------
-
-  Future<int> insertTopic(Topic topic) async {
+  Future<Module?> getModule(int id) async {
     final db = await database;
-    return db.insert('topics', {'name': topic.name});
-  }
-
-  Future<List<Topic>> getAllTopics() async {
-    final db = await database;
-    final rows = await db.query('topics', orderBy: 'name ASC');
-    return rows.map((r) => Topic.fromMap(r)).toList();
+    final rows = await db.query('modules', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : Module.fromMap(rows.first);
   }
 
   // ---------- Questions ----------
@@ -124,10 +149,21 @@ class DatabaseHelper {
     await db.delete('questions', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<Question>> getQuestionsByTopic(int topicId) async {
+  Future<List<Question>> getQuestionsByModule(int moduleId) async {
     final db = await database;
-    final rows =
-    await db.query('questions', where: 'topicId = ?', whereArgs: [topicId]);
+    final rows = await db
+        .query('questions', where: 'moduleId = ?', whereArgs: [moduleId]);
+    return rows.map((r) => Question.fromMap(r)).toList();
+  }
+
+  Future<List<Question>> getQuestionsByModuleAndMode(
+      int moduleId, String gameMode) async {
+    final db = await database;
+    final rows = await db.query(
+      'questions',
+      where: 'moduleId = ? AND gameMode = ?',
+      whereArgs: [moduleId, gameMode],
+    );
     return rows.map((r) => Question.fromMap(r)).toList();
   }
 
@@ -152,5 +188,121 @@ class DatabaseHelper {
     final db = await database;
     final rows = await db.query('attempts', orderBy: 'takenAt DESC');
     return rows.map((r) => Attempt.fromMap(r)).toList();
+  }
+
+  /// Per-game-mode attempt count and average accuracy for one module -
+  /// this is the aggregate view your capstone results chapter needs
+  /// (raw per-attempt rows are in getAllAttempts()).
+  Future<Map<String, Map<String, dynamic>>> getModuleStats(
+      int moduleId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT
+        gameMode,
+        COUNT(*) AS attemptCount,
+        AVG(score * 1.0 / totalItems) AS avgAccuracy
+      FROM attempts
+      WHERE moduleId = ?
+      GROUP BY gameMode
+    ''', [moduleId]);
+
+    return {
+      for (final r in rows)
+        r['gameMode'] as String: {
+          'attemptCount': r['attemptCount'] as int,
+          'avgAccuracy': (r['avgAccuracy'] as num?)?.toDouble() ?? 0.0,
+        },
+    };
+  }
+
+  // ---------- Question progress (adaptive learning memory) ----------
+
+  Future<QuestionProgress?> getQuestionProgress(int questionId) async {
+    final db = await database;
+    final rows = await db.query('question_progress',
+        where: 'questionId = ?', whereArgs: [questionId], limit: 1);
+    return rows.isEmpty ? null : QuestionProgress.fromMap(rows.first);
+  }
+
+  Future<void> saveQuestionProgress(QuestionProgress progress) async {
+    final db = await database;
+    await db.insert(
+      'question_progress',
+      progress.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Questions for a module/game mode, each annotated with its current
+  /// Leitner box (defaults to 1 - highest priority - for questions the
+  /// student hasn't answered yet).
+  Future<List<Map<String, dynamic>>> getQuestionsWithProgress(
+      int moduleId, String gameMode) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT q.*, COALESCE(p.box, 1) AS box
+      FROM questions q
+      LEFT JOIN question_progress p ON p.questionId = q.id
+      WHERE q.moduleId = ? AND q.gameMode = ?
+    ''', [moduleId, gameMode]);
+  }
+
+  /// Questions the student is still struggling with (box <= [maxBox]) -
+  /// backs a "Review Mistakes" style feature.
+  Future<List<Question>> getWeakQuestions(int moduleId, {int maxBox = 2}) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT q.*
+      FROM questions q
+      JOIN question_progress p ON p.questionId = q.id
+      WHERE q.moduleId = ? AND p.box <= ?
+    ''', [moduleId, maxBox]);
+    return rows.map((r) => Question.fromMap(r)).toList();
+  }
+
+  // ---------- Aggregate stats (capstone Chapter 4 results) ----------
+
+  /// Average score across every attempt for [moduleId], as a percentage
+  /// of totalItems. 0.0 if the module has no attempts yet (AVG() over
+  /// zero rows is NULL, not 0, in SQL).
+  Future<double> getAverageScoreByModule(int moduleId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT AVG(score * 100.0 / totalItems) AS avgScore
+      FROM attempts
+      WHERE moduleId = ? AND totalItems > 0
+    ''', [moduleId]);
+    return (rows.first['avgScore'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// Average score across every attempt for [gameMode], across all
+  /// modules. 0.0 if that game mode has no attempts yet.
+  Future<double> getAverageScoreByGameMode(String gameMode) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT AVG(score * 100.0 / totalItems) AS avgScore
+      FROM attempts
+      WHERE gameMode = ? AND totalItems > 0
+    ''', [gameMode]);
+    return (rows.first['avgScore'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// Average score for [moduleId], broken down per game mode - e.g.
+  /// {'quiz': 85.2, 'matching': 72.1, 'survival': 60.0}. A game mode the
+  /// student hasn't attempted for this module is simply absent from the
+  /// map rather than present with a 0.0.
+  Future<Map<String, double>> getAverageScoreByGameModeForModule(
+      int moduleId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT gameMode, AVG(score * 100.0 / totalItems) AS avgScore
+      FROM attempts
+      WHERE moduleId = ? AND totalItems > 0
+      GROUP BY gameMode
+    ''', [moduleId]);
+    return {
+      for (final r in rows)
+        r['gameMode'] as String: (r['avgScore'] as num?)?.toDouble() ?? 0.0,
+    };
   }
 }

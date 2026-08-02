@@ -1,25 +1,23 @@
 import 'package:flutter/material.dart';
-import 'admin/admin_login_screen.dart';
 
-/// Student-facing entry point. Admin access is deliberately NOT a big
-/// visible button - a long-press on the title, per the code below - so
-/// students don't casually wander into the question editor.
+import 'module_select_screen.dart';
+
+/// Student-facing entry point. There is no admin/login role in this app -
+/// any student can import material and play directly.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
+
+  void _openGame(BuildContext context, String gameMode) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ModuleSelectScreen(gameMode: gameMode),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: GestureDetector(
-          onLongPress: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AdminLoginScreen()),
-            );
-          },
-          child: const Text('Gen Bio Offline Review'),
-        ),
+        title: const Text('Gen Bio Offline Review'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -34,25 +32,19 @@ class HomeScreen extends StatelessWidget {
             _GameButton(
               label: 'Timed Quiz',
               icon: Icons.timer,
-              onTap: () {
-                // TODO: Navigator.push to QuizGameScreen
-              },
+              onTap: () => _openGame(context, 'quiz'),
             ),
             const SizedBox(height: 16),
             _GameButton(
               label: 'Matching Game',
               icon: Icons.compare_arrows,
-              onTap: () {
-                // TODO: Navigator.push to MatchingGameScreen
-              },
+              onTap: () => _openGame(context, 'matching'),
             ),
             const SizedBox(height: 16),
             _GameButton(
               label: 'Survival Mode',
               icon: Icons.favorite,
-              onTap: () {
-                // TODO: Navigator.push to SurvivalGameScreen
-              },
+              onTap: () => _openGame(context, 'survival'),
             ),
           ],
         ),

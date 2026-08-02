@@ -30,11 +30,6 @@ dependencies:
   archive: ^3.4.10
   xml: ^6.5.0
 
-  # Admin password hashing - pure Dart, no native/internet dependency
-  bcrypt: ^1.1.3
-
-  provider: ^6.1.2
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
