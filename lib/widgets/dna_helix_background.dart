@@ -91,6 +91,13 @@ class _BioHudPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // The very first paint pass on cold start can land before layout has
+    // settled a real size (constraints briefly 0x0) - _drawParticles'
+    // "% size.height" is a modulo BY size, which for a zero double is NaN
+    // (not a thrown error, per IEEE754), and Offset rejects NaN. Skip that
+    // one frame entirely rather than drawing nothing meaningful at 0x0
+    // anyway; the next frame repaints with a real size once laid out.
+    if (size.width <= 0 || size.height <= 0) return;
     _drawScanRings(canvas, size);
     _drawHelix(canvas, size);
     _drawHexCluster(canvas, size);

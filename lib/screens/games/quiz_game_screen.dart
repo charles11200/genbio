@@ -30,8 +30,6 @@ class QuizGameScreen extends StatefulWidget {
 }
 
 class _QuizGameScreenState extends State<QuizGameScreen> {
-  static const int _questionLimit = 15;
-
   bool _loading = true;
   List<Question> _questions = [];
   int _index = 0;
@@ -54,11 +52,12 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
   }
 
   Future<void> _load() async {
-    final pool = await QuestionPoolService.buildPool(
-      widget.moduleId,
-      'quiz',
-      limit: _questionLimit,
-    );
+    // No limit: the student already chose how many questions this module
+    // should have at import time (see the count picker in
+    // ImportContentScreen), so silently capping the round here would
+    // override that choice - pick 50, play 15. The module's own size IS
+    // the intended quiz length.
+    final pool = await QuestionPoolService.buildPool(widget.moduleId, 'quiz');
     if (!mounted) return;
     setState(() {
       _questions = pool;
@@ -68,8 +67,14 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
   }
 
   void _startQuestionTimer() {
-    _secondsLeft = widget.difficulty.secondsPerQuestion;
     _timer?.cancel();
+    // Must be inside setState: this runs *after* the caller's own
+    // setState (in _load/_advance) has already scheduled its rebuild, so
+    // a bare assignment here would leave the timer text and progress bar
+    // showing the previous question's leftover value - 0 on first load,
+    // rendering as "0 s" with an empty red bar - until the first tick a
+    // full second later.
+    setState(() => _secondsLeft = widget.difficulty.secondsPerQuestion);
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_secondsLeft <= 1) {
         t.cancel();
@@ -152,7 +157,11 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
 
   Widget _buildQuiz(BuildContext context) {
     final q = _current;
-    return Padding(
+    // Scrollable: a definition-style question's four choices are each a
+    // full sentence (see QuestionGenerator.formatChoices), so a long
+    // question plus four multi-line choices overflows a fixed Column on
+    // smaller screens.
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

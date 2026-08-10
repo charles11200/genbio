@@ -72,6 +72,19 @@ void main() {
       expect(result.length, 3);
     });
 
+    test(
+        'a pool larger than the old hardcoded 15-question quiz cap is '
+        'returned in full (regression: QuizGameScreen passed limit:15, so '
+        'a student who chose 50 questions at import silently played only '
+        '15 of them)', () {
+      final pool = [
+        for (var i = 1; i <= 50; i++) (question: _q(i), weight: 1),
+      ];
+      final result = AdaptiveLearningService.weightedSampleWithoutReplacement(
+          pool, 1 << 30, Random(1));
+      expect(result.length, 50);
+    });
+
     test('heavily favors high-weight (weak/box-1) questions over many draws',
         () {
       final pool = [

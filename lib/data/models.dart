@@ -49,6 +49,13 @@ class Question {
   final String theory; // source sentence shown on the post-answer explanation
   final String gameMode; // 'quiz' | 'matching' | 'survival'
   final String questionType; // 'mcq' (quiz/survival) | 'pair' (matching)
+  // Gates whether a question is actually playable - see
+  // ReviewQuestionsScreen and QuestionPoolService. Defaults to true (a
+  // manually-constructed Question is trusted as-is); the one place that
+  // should start false is auto-generated content fresh out of
+  // ContentImportService, which is unreviewed until a student confirms or
+  // edits it.
+  final bool verified;
 
   Question({
     this.id,
@@ -64,6 +71,7 @@ class Question {
     this.difficulty = 'medium',
     this.theory = '',
     this.questionType = 'mcq',
+    this.verified = true,
   });
 
   /// Non-null choices only - always length 4 for a well-formed 'mcq' row,
@@ -85,6 +93,7 @@ class Question {
     'theory': theory,
     'gameMode': gameMode,
     'questionType': questionType,
+    'verified': verified ? 1 : 0,
   };
 
   factory Question.fromMap(Map<String, dynamic> map) => Question(
@@ -101,6 +110,7 @@ class Question {
     theory: map['theory'] as String? ?? '',
     gameMode: map['gameMode'] as String,
     questionType: map['questionType'] as String? ?? 'mcq',
+    verified: (map['verified'] as int? ?? 1) == 1,
   );
 }
 

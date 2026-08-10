@@ -2,6 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:genbio/services/question_generator.dart';
 import 'package:genbio/services/text_quality_filter.dart';
 
+/// Distinct alphabetic suffix per index - the generator's term extraction
+/// only matches letters, so numbered names like "Organelle12" would be
+/// truncated to a single colliding term.
+String _word(int i) {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  return '${letters[i ~/ 26 % 26]}${letters[i % 26]}';
+}
+
 void main() {
   group('GrammarValidator.isPlausibleSentence', () {
     test('accepts a normal grammatical sentence', () {
@@ -144,6 +152,32 @@ void main() {
       expect(first, second);
     });
 
+    test(
+        'reports the material\'s true capacity instead of stopping at a '
+        'fixed cap (regression: a hardcoded count=24 default silently '
+        'capped generation, so the import count picker could never offer '
+        'more than 24 no matter how much material was supplied)', () {
+      // 40 definition sentences - comfortably more than the old 24 cap, so
+      // a re-introduced fixed cap would fail this. Each definition must be
+      // distinct: identical clauses are (correctly) rejected as distractors
+      // since they'd be indistinguishable from the right answer.
+      // The distinguishing token deliberately does NOT derive from the term
+      // itself - a definition that repeats its own term is rejected as a
+      // giveaway, which would zero out this document.
+      final text = List.generate(
+        40,
+        (i) => 'Organelle${_word(i)} is a cell structure that performs the '
+            'zeta${_word(i)} process inside the living cell.',
+      ).join(' ');
+
+      final questions = QuestionGenerator.generate(text);
+      expect(
+        questions.length,
+        greaterThan(24),
+        reason: 'generation stopped early - capacity is being capped',
+      );
+    });
+
     test('produces nothing from a header/table-only document', () {
       const junk = 'Chapter Three Cellular Biology Overview Diagram Figure '
           '1 2 3 4 5 6 7 8 9 10 11 12 13 SECTION FOUR RESULTS AND DISCUSSION';
@@ -170,6 +204,33 @@ void main() {
       );
     });
 
+    test(
+        'a one-word subject cannot leak into its own distractor pool '
+        '(regression: term-extraction regex over-capturing "Subject is '
+        'the" as one pool entry, distinct enough from the clean subject '
+        'to dodge the exclusion check)', () {
+      const bio = 'Mitochondria is the powerhouse of the cell. '
+          'Nucleus is the control center of the cell. '
+          'Ribosome is the site of protein synthesis. '
+          'Chloroplast is the site of photosynthesis in plant cells.';
+      final questions = QuestionGenerator.generate(bio);
+      // Located by compareTerm, not by questionText: the phrasing is
+      // template-varied now, so "What is Mitochondria?" is only one of
+      // several forms this question can legitimately take.
+      final mitochondriaQuestion = questions.firstWhere(
+        (q) => q.compareTerm.toLowerCase() == 'mitochondria',
+      );
+      final distractors = mitochondriaQuestion.choices
+          .where((c) => c != mitochondriaQuestion.correctAnswer);
+      for (final d in distractors) {
+        expect(
+          d.toLowerCase().startsWith('mitochondria'),
+          isFalse,
+          reason: 'distractor "$d" leaks the question\'s own subject',
+        );
+      }
+    });
+
     test('filters out a sentence that opens with a pronoun ("It is...")',
         () {
       const bio = 'Mitochondria is the powerhouse of the cell. '
@@ -183,6 +244,128 @@ void main() {
             q.sourceSentence.startsWith('It is responsible')),
         isFalse,
       );
+    });
+
+    test(
+        'no definition-style choice names the term its own question asks '
+        'about (regression: choices were whole "Term is Definition" '
+        'sentences, so the answer to "What is Nucleus?" was the only one '
+        'starting with "Nucleus" - findable by first-word matching alone, '
+        'with zero biology knowledge)', () {
+      const bio = 'Mitochondria is the powerhouse of the cell. '
+          'Nucleus is the control center that holds genetic material. '
+          'Ribosome is the site of protein synthesis. '
+          'Chloroplast is the site of photosynthesis in plant cells.';
+      final questions =
+          QuestionGenerator.generate(bio).where((q) => q.isDefinitionStyle);
+
+      expect(questions, isNotEmpty);
+      for (final q in questions) {
+        for (final choice in q.choices) {
+          expect(
+            choice.toLowerCase().contains(q.compareTerm.toLowerCase()),
+            isFalse,
+            reason: 'choice "$choice" contains the asked-about term '
+                '"${q.compareTerm}" - gives the answer away',
+          );
+        }
+      }
+    });
+
+    test('definition questions do not all use the same "What is X?" phrasing',
+        () {
+      const bio = 'Mitochondria is the powerhouse of the cell. '
+          'Nucleus is the control center that holds genetic material. '
+          'Ribosome is the site of protein synthesis. '
+          'Chloroplast is the site of photosynthesis in plant cells. '
+          'Enzyme is the protein that speeds up chemical reactions. '
+          'Chromosome is the structure that carries hereditary information. '
+          'Vacuole is the storage compartment that holds water and food. '
+          'Lysosome is the organelle that breaks down waste material.';
+      final questions = QuestionGenerator.generate(bio)
+          .where((q) => q.isDefinitionStyle)
+          .toList();
+
+      expect(questions.length, greaterThan(3));
+      final phrasings = questions
+          .map((q) => q.questionText.replaceAll(q.compareTerm, '{t}'))
+          .toSet();
+      expect(
+        phrasings.length,
+        greaterThan(1),
+        reason: 'every definition question used an identical phrasing',
+      );
+    });
+
+    test(
+        'a large document yields 50+ questions that are all distinct - no '
+        'repeated question text, no repeated correct answer, and more than '
+        'one phrasing', () {
+      // 60 definition sentences, each with its own distinct definition.
+      final text = List.generate(
+        60,
+        (i) => 'Organelle${_word(i)} is a cell structure that performs the '
+            'zeta${_word(i)} process inside the living cell.',
+      ).join(' ');
+
+      final questions = QuestionGenerator.generate(text);
+
+      expect(
+        questions.length,
+        greaterThanOrEqualTo(50),
+        reason: 'a 60-definition document should support a 50-question '
+            'reviewer',
+      );
+
+      final texts = questions.map((q) => q.questionText).toList();
+      expect(
+        texts.toSet().length,
+        texts.length,
+        reason: 'the same question was generated more than once',
+      );
+
+      final answers = questions.map((q) => q.correctAnswer).toList();
+      expect(
+        answers.toSet().length,
+        answers.length,
+        reason: 'two questions share a correct answer, so one of them has an '
+            'ambiguous/duplicate right choice',
+      );
+
+      // Every question must still be internally well-formed at this scale.
+      for (final q in questions) {
+        expect(q.choices.length, 4);
+        expect(q.choices.toSet().length, 4, reason: 'duplicate choice');
+        expect(q.choices, contains(q.correctAnswer));
+      }
+
+      final phrasings = questions
+          .where((q) => q.isDefinitionStyle)
+          .map((q) => q.questionText.replaceAll(q.compareTerm, '{t}'))
+          .toSet();
+      expect(
+        phrasings.length,
+        greaterThan(2),
+        reason: 'a 50-question reviewer should not read as one repeated '
+            'question - got only ${phrasings.length} distinct phrasing(s)',
+      );
+    });
+
+    test('question phrasing is stable across runs, not randomly re-rolled',
+        () {
+      const bio = 'Mitochondria is the powerhouse of the cell. '
+          'Nucleus is the control center that holds genetic material. '
+          'Ribosome is the site of protein synthesis. '
+          'Chloroplast is the site of photosynthesis in plant cells.';
+      final first = QuestionGenerator.generate(bio)
+          .map((q) => q.questionText)
+          .toList()
+        ..sort();
+      final second = QuestionGenerator.generate(bio)
+          .map((q) => q.questionText)
+          .toList()
+        ..sort();
+      expect(first, second);
     });
   });
 

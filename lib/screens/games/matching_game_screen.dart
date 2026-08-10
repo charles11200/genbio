@@ -95,8 +95,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 
   void _startRoundTimer() {
-    _secondsLeft = widget.difficulty.secondsPerMatchingRound;
     _timer?.cancel();
+    // Inside setState: _startRound()'s own setState has already scheduled
+    // a rebuild by the time this runs, so a bare assignment would leave
+    // the round clock showing the previous round's leftover value (0 on
+    // the first round) until the first tick a second later.
+    setState(() => _secondsLeft = widget.difficulty.secondsPerMatchingRound);
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_secondsLeft <= 1) {
         t.cancel();
@@ -227,38 +231,45 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
           const SizedBox(height: 4),
           Text('$_secondsLeft s', textAlign: TextAlign.right),
           const SizedBox(height: 16),
+          // One shared scroll view over both columns, rather than two
+          // independent ones: a term and its definition must stay
+          // side-by-side and reachable together, which separate scroll
+          // positions would break. Five tiles of up-to-3-line definitions
+          // overflow a fixed-height Column on smaller screens.
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    children: [
-                      for (final q in _terms)
-                        _MatchTile(
-                          text: q.questionText,
-                          locked: _matchedIds.contains(q.id),
-                          color: _tileColor(context, q.id!, isTerm: true),
-                          onTap: () => _tapTerm(q),
-                        ),
-                    ],
+            child: SingleChildScrollView(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        for (final q in _terms)
+                          _MatchTile(
+                            text: q.questionText,
+                            locked: _matchedIds.contains(q.id),
+                            color: _tileColor(context, q.id!, isTerm: true),
+                            onTap: () => _tapTerm(q),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    children: [
-                      for (final q in _definitions)
-                        _MatchTile(
-                          text: q.correctAnswer,
-                          locked: _matchedIds.contains(q.id),
-                          color: _tileColor(context, q.id!, isTerm: false),
-                          onTap: () => _tapDefinition(q),
-                        ),
-                    ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        for (final q in _definitions)
+                          _MatchTile(
+                            text: q.correctAnswer,
+                            locked: _matchedIds.contains(q.id),
+                            color: _tileColor(context, q.id!, isTerm: false),
+                            onTap: () => _tapDefinition(q),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],

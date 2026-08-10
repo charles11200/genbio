@@ -167,13 +167,26 @@ class GrammarValidator {
     return !EnglishGrammarDictionary.meaninglessSubjects.contains(firstWord);
   }
 
-  /// The term-extraction regex sometimes captures a trailing verb as part
-  /// of the phrase ("Mitochondria produce"). Trimming it keeps
-  /// fill-in-the-blank answers and distractor text clean - repeatedly
-  /// strips trailing linking/action-verb words until none remain.
+  static const Set<String> _trailingArticles = {'a', 'an', 'the'};
+
+  /// The term-extraction regex sometimes captures trailing grammatical
+  /// words as part of the phrase, not just a verb ("Mitochondria produce")
+  /// but a verb *and* the article after it for a one-word subject
+  /// ("Mitochondria is the" - the regex's 2-trailing-word budget covers
+  /// both "is" and "the"). Only stripping verbs left "the" blocking
+  /// the loop from ever reaching the "is" underneath it, so the pool ended
+  /// up with "Mitochondria is the" as a distinct entry from the clean
+  /// "Mitochondria" subject - distinct enough to dodge the exact-match
+  /// distractor-pool exclusion, so a term could end up as its own
+  /// distractor. Stripping trailing articles too, in the same pass,
+  /// closes that gap: repeatedly strips trailing linking/action-verb
+  /// words AND trailing articles, in whatever order they appear, until
+  /// neither applies.
   static String trimTrailingVerb(String term) {
     final words = term.trim().split(RegExp(r'\s+'));
-    while (words.length > 1 && _isVerb(words.last)) {
+    while (words.length > 1 &&
+        (_isVerb(words.last) ||
+            _trailingArticles.contains(words.last.toLowerCase()))) {
       words.removeLast();
     }
     return words.join(' ');

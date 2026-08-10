@@ -6,6 +6,6 @@ void main() {
   testWidgets('Home screen shows the app title', (WidgetTester tester) async {
     await tester.pumpWidget(const GenBioReviewApp());
 
-    expect(find.text('Gen Bio Offline Review'), findsOneWidget);
+    expect(find.text('BioQuest'), findsOneWidget);
   });
 }

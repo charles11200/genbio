@@ -14,14 +14,22 @@ class PptxExtractor {
 
     final buffer = StringBuffer();
 
-    // Collect and sort slide files so slide1, slide2... come out in order
+    // Collect and sort slide files so slide1, slide2, ... slide10 come out
+    // in numeric order. A plain string sort would put "slide10" before
+    // "slide2" (lexicographic '1' < '2'), scrambling extraction order for
+    // any deck with 10+ slides, so sort by the parsed slide number instead.
+    final slideNumber = RegExp(r'slide(\d+)\.xml$');
     final slideFiles = archive.files
         .where((f) =>
     f.isFile &&
         f.name.startsWith('ppt/slides/slide') &&
-        f.name.endsWith('.xml'))
+        slideNumber.hasMatch(f.name))
         .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+      ..sort((a, b) {
+        final aNum = int.parse(slideNumber.firstMatch(a.name)!.group(1)!);
+        final bNum = int.parse(slideNumber.firstMatch(b.name)!.group(1)!);
+        return aNum.compareTo(bNum);
+      });
 
     for (final file in slideFiles) {
       final xmlString = String.fromCharCodes(file.content as List<int>);

@@ -36,12 +36,20 @@ class DatabaseHelper {
     )
   ''';
 
+  // v3: added `verified` - gates whether a question is actually playable,
+  // see ReviewQuestionsScreen. DEFAULT 1 so upgrading the app doesn't
+  // suddenly make every already-imported module's existing questions
+  // unplayable; ContentImportService explicitly inserts fresh
+  // auto-generated rows as verified=0, pending review.
+  static const String _addVerifiedColumnSql =
+      'ALTER TABLE questions ADD COLUMN verified INTEGER NOT NULL DEFAULT 1';
+
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'genbio_review.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE modules (
@@ -52,6 +60,7 @@ class DatabaseHelper {
           )
         ''');
         await db.execute(_createQuestionsSqlV2);
+        await db.execute(_addVerifiedColumnSql);
         await db.execute('''
           CREATE TABLE attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,6 +105,9 @@ class DatabaseHelper {
             FROM questions_v1
           ''');
           await db.execute('DROP TABLE questions_v1');
+        }
+        if (oldVersion < 3) {
+          await db.execute(_addVerifiedColumnSql);
         }
       },
     );
@@ -156,7 +168,7 @@ class DatabaseHelper {
     return rows.map((r) => Question.fromMap(r)).toList();
   }
 
-  Future<List<Question>> getQuestionsByModuleAndMode(
+  Future<List<Question>> getQuestionsByModuleAndGameMode(
       int moduleId, String gameMode) async {
     final db = await database;
     final rows = await db.query(
@@ -235,16 +247,42 @@ class DatabaseHelper {
 
   /// Questions for a module/game mode, each annotated with its current
   /// Leitner box (defaults to 1 - highest priority - for questions the
-  /// student hasn't answered yet).
+  /// student hasn't answered yet). Only verified questions are eligible -
+  /// this is the single query every game mode's pool ultimately draws
+  /// from (via QuestionPoolService), so it's the one place that needs to
+  /// enforce "unreviewed auto-generated questions never get played."
+  ///
+  /// Selection is by questionType, NOT gameMode: Quiz and Survival are
+  /// both 4-choice MCQ modes that differ only in their rules (fixed
+  /// length vs lives), so they draw from the SAME full 'mcq' pool.
+  /// Previously each MCQ row was tagged for one mode or the other and the
+  /// two modes split the pool in half, which is what starved Survival of
+  /// questions.
   Future<List<Map<String, dynamic>>> getQuestionsWithProgress(
       int moduleId, String gameMode) async {
     final db = await database;
+    final questionType = gameMode == 'matching' ? 'pair' : 'mcq';
     return db.rawQuery('''
       SELECT q.*, COALESCE(p.box, 1) AS box
       FROM questions q
       LEFT JOIN question_progress p ON p.questionId = q.id
-      WHERE q.moduleId = ? AND q.gameMode = ?
-    ''', [moduleId, gameMode]);
+      WHERE q.moduleId = ? AND q.questionType = ? AND q.verified = 1
+    ''', [moduleId, questionType]);
+  }
+
+  /// Marks every question in [moduleId] as verified - called once a
+  /// student finishes reviewing a freshly-imported module's auto-generated
+  /// questions (see ReviewQuestionsScreen). Anything they deleted along
+  /// the way is already gone from the table, so this simply trusts
+  /// whatever's left.
+  Future<void> verifyAllQuestions(int moduleId) async {
+    final db = await database;
+    await db.update(
+      'questions',
+      {'verified': 1},
+      where: 'moduleId = ?',
+      whereArgs: [moduleId],
+    );
   }
 
   /// Questions the student is still struggling with (box <= [maxBox]) -

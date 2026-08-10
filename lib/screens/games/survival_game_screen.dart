@@ -67,8 +67,10 @@ class _SurvivalGameScreenState extends State<SurvivalGameScreen> {
   }
 
   void _startQuestionTimer() {
-    _secondsLeft = widget.difficulty.secondsPerQuestion;
     _timer?.cancel();
+    // Inside setState for the same reason as QuizGameScreen's copy - see
+    // the comment there.
+    setState(() => _secondsLeft = widget.difficulty.secondsPerQuestion);
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_secondsLeft <= 1) {
         t.cancel();
@@ -159,7 +161,9 @@ class _SurvivalGameScreenState extends State<SurvivalGameScreen> {
 
   Widget _buildGame(BuildContext context) {
     final q = _current;
-    return Padding(
+    // Scrollable for the same reason as QuizGameScreen - four
+    // sentence-length choices plus a long question can exceed the screen.
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

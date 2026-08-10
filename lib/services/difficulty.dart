@@ -2,13 +2,14 @@
 /// student before a round starts (see ModuleSelectScreen) and used to size
 /// every timer in the game screens. One enum, one place per-difficulty
 /// timing lives, so Quiz/Matching/Survival can't silently drift apart.
-enum Difficulty { easy, medium, hard }
+enum Difficulty { easy, medium, hard, veryHard }
 
 extension DifficultyTiming on Difficulty {
   String get label => switch (this) {
     Difficulty.easy => 'Easy',
     Difficulty.medium => 'Medium',
     Difficulty.hard => 'Hard',
+    Difficulty.veryHard => 'Very Hard',
   };
 
   /// Seconds allotted per question in Timed Quiz and Survival mode.
@@ -16,6 +17,7 @@ extension DifficultyTiming on Difficulty {
     Difficulty.easy => 20,
     Difficulty.medium => 15,
     Difficulty.hard => 10,
+    Difficulty.veryHard => 5,
   };
 
   /// Seconds allotted per 5-pair round in Matching mode - one shared clock
@@ -25,5 +27,6 @@ extension DifficultyTiming on Difficulty {
     Difficulty.easy => 75,
     Difficulty.medium => 60,
     Difficulty.hard => 45,
+    Difficulty.veryHard => 30,
   };
 }

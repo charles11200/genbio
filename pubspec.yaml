@@ -30,12 +30,34 @@ dependencies:
   archive: ^3.4.10
   xml: ^6.5.0
 
+  # On-device (offline, no network) inference for the Biology-term
+  # embedding model used to rank distractor relevance - see
+  # lib/services/term_embedding_service.dart. Official TensorFlow-managed
+  # Flutter binding, not a third-party wrapper.
+  tflite_flutter: ^0.12.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  # Runs as a real app process on-device, unlike flutter_test's host-side
+  # runner - needed to actually exercise tflite_flutter (native plugin
+  # loading isn't available in a plain `flutter test` run).
+  integration_test:
+    sdk: flutter
+  # Dev-only tool that regenerates android/.../mipmap-*/ic_launcher.png at
+  # every required density from one source image - not a runtime
+  # dependency, doesn't touch the shipped app's offline behavior.
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
   assets:
     - assets/image.png
+    - assets/models/biology_term_embedder.tflite
+    - assets/models/biology_vocab.txt
+
+# Run: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  image_path: assets/image.png
