@@ -1,0 +1,10 @@
+{
+  "vocab_size": 16445,
+  "embed_dim": 64,
+  "window": 4,
+  "min_count": 3,
+  "training_pairs": 10664884,
+  "corpus_tokens": 1351213,
+  "epochs": 8,
+  "seed": 7
+}
