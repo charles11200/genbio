@@ -1,0 +1,18 @@
+# Template for android/key.properties (which is gitignored and must never
+# be shared or committed - it unlocks the app signing key).
+#
+# The real key.properties + bioquest-release.jks already exist on this
+# machine. This file documents what they contain so the release build can
+# be reproduced if they are ever lost - though note that losing the .jks
+# means a rebuilt app can no longer upgrade an existing install: Android
+# refuses to replace an app with one signed by a different key, and users
+# have to uninstall first.
+#
+# To create a new keystore from scratch:
+#   keytool -genkeypair -v -keystore android/bioquest-release.jks \
+#     -alias bioquest -keyalg RSA -keysize 2048 -validity 10000
+
+storePassword=<the keystore password>
+keyPassword=<the key password>
+keyAlias=bioquest
+storeFile=../bioquest-release.jks

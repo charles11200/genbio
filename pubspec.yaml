@@ -36,6 +36,27 @@ dependencies:
   # Flutter binding, not a third-party wrapper.
   tflite_flutter: ^0.12.1
 
+  # OCR fallback for scanned/photographed PDFs (e.g. phone scanner apps
+  # like TapScanner) that have no digital text layer at all - Syncfusion's
+  # PdfTextExtractor only reads existing text layers, it can't read text
+  # baked into an image. pdfx rasterizes each low-text page to a bitmap
+  # (Android's native PdfRenderer, offline); flutter_tesseract_ocr then
+  # runs Tesseract against that bitmap using the bundled eng.traineddata
+  # below - fully on-device, no network call, no runtime download. See
+  # lib/services/pdf_extractor.dart.
+  pdfx: ^2.11.0
+  # Vendored locally, not pulled from pub.dev - the published package's
+  # Android Gradle config is broken on current tooling. See
+  # third_party/flutter_tesseract_ocr/README.md for exactly what was wrong
+  # and what was changed (one file, the rest is unmodified upstream code).
+  flutter_tesseract_ocr:
+    path: third_party/flutter_tesseract_ocr
+
+  # Short local SFX (round start / win / lose) - see
+  # lib/services/sound_service.dart. Plays bundled assets only, never a
+  # network URL, same offline-only rule as everything else in this app.
+  audioplayers: ^6.8.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -56,6 +77,12 @@ flutter:
     - assets/image.png
     - assets/models/biology_term_embedder.tflite
     - assets/models/biology_vocab.txt
+    - assets/sounds/start.mp3
+    - assets/sounds/win.wav
+    - assets/sounds/lose.mp3
+    - assets/sounds/bgm.mp3
+    - assets/tessdata/
+    - assets/tessdata_config.json
 
 # Run: dart run flutter_launcher_icons
 flutter_launcher_icons:
