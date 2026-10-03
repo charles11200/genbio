@@ -7,6 +7,8 @@ import '../../data/models.dart';
 import '../../services/adaptive_learning_service.dart';
 import '../../services/difficulty.dart';
 import '../../services/question_pool_service.dart';
+import '../../services/scoring.dart';
+import '../../services/sound_service.dart';
 import 'game_widgets.dart';
 import 'results_screen.dart';
 
@@ -57,13 +59,20 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
     // ImportContentScreen), so silently capping the round here would
     // override that choice - pick 50, play 15. The module's own size IS
     // the intended quiz length.
-    final pool = await QuestionPoolService.buildPool(widget.moduleId, 'quiz');
+    final pool = await QuestionPoolService.buildPool(
+      widget.moduleId,
+      'quiz',
+      difficulty: widget.difficulty.dbValue,
+    );
     if (!mounted) return;
     setState(() {
       _questions = pool;
       _loading = false;
     });
-    if (pool.isNotEmpty) _startQuestionTimer();
+    if (pool.isNotEmpty) {
+      SoundService.playStart();
+      _startQuestionTimer();
+    }
   }
 
   void _startQuestionTimer() {
@@ -126,6 +135,14 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
   }
 
   Future<void> _finish() async {
+    // Quiz has no other win/lose state of its own (unlike Survival's
+    // lives), so the pass/fail threshold in scoring.dart decides which
+    // sound plays.
+    if (isPassingScore(_score, _questions.length)) {
+      SoundService.playWin();
+    } else {
+      SoundService.playLose();
+    }
     await DatabaseHelper.instance.insertAttempt(Attempt(
       gameMode: 'quiz',
       moduleId: widget.moduleId,
@@ -150,7 +167,10 @@ class _QuizGameScreenState extends State<QuizGameScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _questions.isEmpty
-              ? const EmptyPoolMessage(gameMode: 'quiz')
+              ? EmptyPoolMessage(
+                  gameMode: 'quiz',
+                  difficultyLabel: widget.difficulty.label,
+                )
               : _buildQuiz(context),
     );
   }

@@ -45,16 +45,19 @@ class Question {
   final String? choiceC;
   final String? choiceD;
   final String source; // 'manual' or 'auto_generated'
-  final String difficulty; // easy / medium / hard
+  // easy | medium | hard | veryHard - assigned by QuestionGenerator's
+  // difficulty tiering for auto-generated content (see its
+  // _assignDifficulties), 'medium' by default for anything else. This is
+  // what each game screen's question pool is actually filtered by - see
+  // DatabaseHelper.getQuestionsWithProgress - not just a display label.
+  final String difficulty;
   final String theory; // source sentence shown on the post-answer explanation
   final String gameMode; // 'quiz' | 'matching' | 'survival'
   final String questionType; // 'mcq' (quiz/survival) | 'pair' (matching)
-  // Gates whether a question is actually playable - see
-  // ReviewQuestionsScreen and QuestionPoolService. Defaults to true (a
-  // manually-constructed Question is trusted as-is); the one place that
-  // should start false is auto-generated content fresh out of
-  // ContentImportService, which is unreviewed until a student confirms or
-  // edits it.
+  // Legacy gate from a since-removed post-import review step - every
+  // question is playable immediately now, so this is always true in
+  // practice. Kept only because dropping a column from a schema already
+  // shipped to real devices is riskier than leaving an inert one behind.
   final bool verified;
 
   Question({
@@ -164,6 +167,11 @@ class Attempt {
   final int moduleId;
   final int score;
   final int totalItems;
+  // Wrong-match attempts in Matching mode - unlike Quiz/Survival, "score
+  // out of totalItems" there is pairs matched out of pairs available, which
+  // doesn't reveal how many wrong taps it took to get there. 0 for
+  // quiz/survival, which don't track this distinctly from totalItems-score.
+  final int mistakes;
   final int? timeTakenSeconds;
   final int takenAt; // epoch millis
 
@@ -174,6 +182,7 @@ class Attempt {
     required this.moduleId,
     required this.score,
     required this.totalItems,
+    this.mistakes = 0,
     this.timeTakenSeconds,
     int? takenAt,
   }) : takenAt = takenAt ?? DateTime.now().millisecondsSinceEpoch;
@@ -185,6 +194,7 @@ class Attempt {
     'moduleId': moduleId,
     'score': score,
     'totalItems': totalItems,
+    'mistakes': mistakes,
     'timeTakenSeconds': timeTakenSeconds,
     'takenAt': takenAt,
   };
@@ -196,6 +206,7 @@ class Attempt {
     moduleId: map['moduleId'] as int,
     score: map['score'] as int,
     totalItems: map['totalItems'] as int,
+    mistakes: map['mistakes'] as int? ?? 0,
     timeTakenSeconds: map['timeTakenSeconds'] as int?,
     takenAt: map['takenAt'] as int,
   );

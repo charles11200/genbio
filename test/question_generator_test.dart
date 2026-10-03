@@ -417,4 +417,133 @@ void main() {
       );
     });
   });
+
+  group('QuestionGenerator difficulty tiering', () {
+    // 60 definitions of visibly different length, so the complexity-based
+    // heuristic has real variation to sort on rather than 60 near-identical
+    // sentences that could all land in one tier by chance.
+    String variedLengthText(int count) {
+      final buffer = StringBuffer();
+      for (var i = 0; i < count; i++) {
+        final extraWords =
+            List.generate(i % 12, (j) => 'detail$j').join(' ');
+        buffer.write(
+          'Organelle${_word(i)} is a cell structure that performs the '
+          'zeta${_word(i)} process $extraWords inside the living cell. ',
+        );
+      }
+      return buffer.toString();
+    }
+
+    test(
+        'a large, length-varied document produces questions in all four '
+        'difficulty tiers, not just one', () {
+      final questions = QuestionGenerator.generate(variedLengthText(60));
+      final tiers = questions.map((q) => q.difficulty).toSet();
+      expect(
+        tiers,
+        containsAll(['easy', 'medium', 'hard', 'veryHard']),
+        reason: 'only produced tiers: $tiers',
+      );
+    });
+
+    test('difficulty assignment is deterministic across runs, not '
+        'random (regression risk: tiering must survive re-import '
+        'producing the same reviewer)', () {
+      final text = variedLengthText(40);
+      final first = {
+        for (final q in QuestionGenerator.generate(text))
+          q.questionText: q.difficulty,
+      };
+      final second = {
+        for (final q in QuestionGenerator.generate(text))
+          q.questionText: q.difficulty,
+      };
+      expect(first, second);
+    });
+
+    test('the shortest question is tagged easier than the longest '
+        '(sanity check that the heuristic actually points the right way)',
+        () {
+      final questions = QuestionGenerator.generate(variedLengthText(40));
+      const tierRank = {'easy': 0, 'medium': 1, 'hard': 2, 'veryHard': 3};
+
+      final byLength = List.of(questions)
+        ..sort((a, b) => (a.questionText.length + a.correctAnswer.length)
+            .compareTo(b.questionText.length + b.correctAnswer.length));
+
+      expect(
+        tierRank[byLength.first.difficulty]!,
+        lessThanOrEqualTo(tierRank[byLength.last.difficulty]!),
+        reason: 'shortest question "${byLength.first.questionText}" '
+            '(${byLength.first.difficulty}) should not be ranked harder '
+            'than the longest "${byLength.last.questionText}" '
+            '(${byLength.last.difficulty})',
+      );
+    });
+
+    test('matching pairs are tiered too, not just MCQ questions', () {
+      final pairs = QuestionGenerator.generateTermDefinitionPairs(
+        variedLengthText(40),
+      );
+      final tiers = pairs.map((p) => p.difficulty).toSet();
+      expect(tiers, containsAll(['easy', 'medium', 'hard', 'veryHard']));
+    });
+  });
+
+  group('QuestionGenerator.selectBalancedByDifficulty', () {
+    Map<String, dynamic> testItem(String difficulty) => {'difficulty': difficulty};
+
+    test('returns everything unchanged when keep >= item count', () {
+      final items = [testItem('easy'), testItem('hard')];
+      expect(QuestionGenerator.selectBalancedByDifficulty(items, 5), items);
+    });
+
+    test('returns nothing when keep is zero or negative', () {
+      final items = [testItem('easy'), testItem('hard')];
+      expect(QuestionGenerator.selectBalancedByDifficulty(items, 0), isEmpty);
+      expect(QuestionGenerator.selectBalancedByDifficulty(items, -3), isEmpty);
+    });
+
+    test(
+        'spreads the pick across all 4 tiers instead of taking the first N '
+        'in list order (regression: a plain .take(keep) after generation '
+        'could leave a whole difficulty level with zero questions even '
+        'though the source material supported it)', () {
+      final items = [
+        for (var i = 0; i < 10; i++) testItem('easy'),
+        for (var i = 0; i < 10; i++) testItem('medium'),
+        for (var i = 0; i < 10; i++) testItem('hard'),
+        for (var i = 0; i < 10; i++) testItem('veryHard'),
+      ];
+      final selected =
+          QuestionGenerator.selectBalancedByDifficulty(items, 20);
+      final counts = <String, int>{};
+      for (final s in selected) {
+        counts[s['difficulty'] as String] =
+            (counts[s['difficulty'] as String] ?? 0) + 1;
+      }
+      expect(selected.length, 20);
+      for (final tier in ['easy', 'medium', 'hard', 'veryHard']) {
+        expect(
+          counts[tier],
+          greaterThan(0),
+          reason: 'tier "$tier" got zero questions out of 20 picked',
+        );
+      }
+    });
+
+    test('redistributes fairly when one tier has fewer items than its '
+        'even share, instead of under-filling the total', () {
+      final items = [
+        testItem('easy'), // only 1 easy - far below a fair 5-per-tier share
+        for (var i = 0; i < 10; i++) testItem('medium'),
+        for (var i = 0; i < 10; i++) testItem('hard'),
+        for (var i = 0; i < 10; i++) testItem('veryHard'),
+      ];
+      final selected =
+          QuestionGenerator.selectBalancedByDifficulty(items, 20);
+      expect(selected.length, 20);
+    });
+  });
 }

@@ -7,6 +7,8 @@ import '../../data/database_helper.dart';
 import '../../data/models.dart';
 import '../../services/difficulty.dart';
 import '../../services/question_pool_service.dart';
+import '../../services/scoring.dart';
+import '../../services/sound_service.dart';
 import 'game_widgets.dart';
 import 'results_screen.dart';
 
@@ -15,11 +17,12 @@ import 'results_screen.dart';
 /// The module's whole 'matching' pool is pulled up front and split into
 /// 5-pair rounds (QuestionPoolService.chunkIntoRounds). Each round shows
 /// its 5 terms and 5 definitions in independently-shuffled columns; a
-/// correct tap pair locks both tiles green and scores a point, a wrong
-/// pair flashes red and simply deselects (no penalty - the student can
-/// retry). A round ends when every pair in it is matched, or when the
-/// shared per-round timer runs out; the game itself ends when every round
-/// has been played.
+/// correct tap pair locks both tiles green, scores a point, and draws a
+/// connecting line between them (see _recomputeLines). A wrong pair
+/// flashes red, draws no line, and simply deselects - no score penalty,
+/// but it counts toward `_mistakes`. A round ends when every pair in it is
+/// matched, or when the shared per-round timer runs out; the game itself
+/// ends when every round has been played.
 class MatchingGameScreen extends StatefulWidget {
   final int moduleId;
   final Difficulty difficulty;
@@ -42,6 +45,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   int _totalPairs = 0;
   int _roundIndex = 0;
   int _score = 0;
+  int _mistakes = 0;
 
   List<Question> _terms = [];
   List<Question> _definitions = [];
@@ -50,6 +54,15 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   int? _selectedDefId;
   int? _wrongFlashTermId;
   int? _wrongFlashDefId;
+
+  // One tile widget per term/definition id, keyed so _recomputeLines can
+  // find each tile's on-screen position after layout - see that method for
+  // why a GlobalKey is the right tool here rather than tracking offsets by
+  // hand.
+  Map<int, GlobalKey> _termKeys = {};
+  Map<int, GlobalKey> _defKeys = {};
+  final GlobalKey _boardKey = GlobalKey();
+  List<_MatchLine> _matchLines = [];
 
   Timer? _timer;
   int _secondsLeft = 0;
@@ -67,7 +80,11 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 
   Future<void> _load() async {
-    final pool = await QuestionPoolService.buildPool(widget.moduleId, 'matching');
+    final pool = await QuestionPoolService.buildPool(
+      widget.moduleId,
+      'matching',
+      difficulty: widget.difficulty.dbValue,
+    );
     if (!mounted) return;
     final rounds = QuestionPoolService.chunkIntoRounds(pool);
     setState(() {
@@ -75,7 +92,13 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
       _totalPairs = pool.length;
       _loading = false;
     });
-    if (rounds.isNotEmpty) _startRound();
+    if (rounds.isNotEmpty) {
+      // Only here, not inside _startRound() - that method also runs for
+      // round 2, 3... of the same session, and the start sound should
+      // play once per game, not once per round.
+      SoundService.playStart();
+      _startRound();
+    }
   }
 
   List<Question> get _currentRoundPairs => _rounds[_roundIndex];
@@ -90,6 +113,9 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
       _selectedDefId = null;
       _wrongFlashTermId = null;
       _wrongFlashDefId = null;
+      _termKeys = {for (final q in pairs) q.id!: GlobalKey()};
+      _defKeys = {for (final q in pairs) q.id!: GlobalKey()};
+      _matchLines = [];
     });
     _startRoundTimer();
   }
@@ -135,12 +161,16 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
         _selectedTermId = null;
         _selectedDefId = null;
       });
+      // Tile positions for this pair are only known once this frame has
+      // been laid out - see _recomputeLines.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _recomputeLines());
       if (_matchedIds.length == _currentRoundPairs.length) {
         _timer?.cancel();
         Future.delayed(const Duration(milliseconds: 500), _goToNextRound);
       }
     } else {
       setState(() {
+        _mistakes++;
         _wrongFlashTermId = termId;
         _wrongFlashDefId = defId;
         _selectedTermId = null;
@@ -156,6 +186,47 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
     }
   }
 
+  /// Computes a screen-space line for every matched pair, from the right
+  /// edge of its term tile to the left edge of its definition tile.
+  ///
+  /// Must run in a post-frame callback, not inline in _attemptMatch: the
+  /// tile that was just matched hasn't been laid out with its new
+  /// (post-match) state yet at the moment setState is called, so reading
+  /// its RenderBox synchronously would still return stale-or-absent
+  /// geometry. By the time this callback fires, that frame has completed
+  /// layout, so every GlobalKey's RenderBox reflects real on-screen
+  /// positions - which this then converts into _boardKey's own coordinate
+  /// space (not the screen's), since _boardKey is the Stack that both the
+  /// tiles and the line-painting CustomPaint live inside. Because that
+  /// whole Stack scrolls as a single rigid unit, positions computed this
+  /// way stay correct through scrolling with no extra listener needed.
+  void _recomputeLines() {
+    if (!mounted) return;
+    final boardBox = _boardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (boardBox == null || !boardBox.attached) return;
+
+    final lines = <_MatchLine>[];
+    for (final id in _matchedIds) {
+      final termBox =
+          _termKeys[id]?.currentContext?.findRenderObject() as RenderBox?;
+      final defBox =
+          _defKeys[id]?.currentContext?.findRenderObject() as RenderBox?;
+      if (termBox == null || defBox == null) continue;
+      if (!termBox.attached || !defBox.attached) continue;
+
+      final start = termBox.localToGlobal(
+        Offset(termBox.size.width, termBox.size.height / 2),
+        ancestor: boardBox,
+      );
+      final end = defBox.localToGlobal(
+        Offset(0, defBox.size.height / 2),
+        ancestor: boardBox,
+      );
+      lines.add(_MatchLine(start, end));
+    }
+    setState(() => _matchLines = lines);
+  }
+
   void _goToNextRound() {
     if (!mounted) return;
     _timer?.cancel();
@@ -168,11 +239,20 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 
   Future<void> _finish() async {
+    // Matching has no other win/lose state of its own (every round always
+    // completes, there's no "ran out of lives"), so the pass/fail
+    // threshold in scoring.dart decides which sound plays - same as Quiz.
+    if (isPassingScore(_score, _totalPairs)) {
+      SoundService.playWin();
+    } else {
+      SoundService.playLose();
+    }
     await DatabaseHelper.instance.insertAttempt(Attempt(
       gameMode: 'matching',
       moduleId: widget.moduleId,
       score: _score,
       totalItems: _totalPairs,
+      mistakes: _mistakes,
     ));
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
@@ -181,6 +261,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
         moduleId: widget.moduleId,
         score: _score,
         totalItems: _totalPairs,
+        mistakes: _mistakes,
       ),
     ));
   }
@@ -203,7 +284,10 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rounds.isEmpty
-              ? const EmptyPoolMessage(gameMode: 'matching')
+              ? EmptyPoolMessage(
+                  gameMode: 'matching',
+                  difficultyLabel: widget.difficulty.label,
+                )
               : _buildGame(context),
     );
   }
@@ -238,34 +322,51 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
           // overflow a fixed-height Column on smaller screens.
           Expanded(
             child: SingleChildScrollView(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
+                key: _boardKey,
                 children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        for (final q in _terms)
-                          _MatchTile(
-                            text: q.questionText,
-                            locked: _matchedIds.contains(q.id),
-                            color: _tileColor(context, q.id!, isTerm: true),
-                            onTap: () => _tapTerm(q),
-                          ),
-                      ],
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            for (final q in _terms)
+                              _MatchTile(
+                                key: _termKeys[q.id],
+                                text: q.questionText,
+                                locked: _matchedIds.contains(q.id),
+                                color: _tileColor(context, q.id!, isTerm: true),
+                                onTap: () => _tapTerm(q),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            for (final q in _definitions)
+                              _MatchTile(
+                                key: _defKeys[q.id],
+                                text: q.correctAnswer,
+                                locked: _matchedIds.contains(q.id),
+                                color: _tileColor(context, q.id!, isTerm: false),
+                                onTap: () => _tapDefinition(q),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        for (final q in _definitions)
-                          _MatchTile(
-                            text: q.correctAnswer,
-                            locked: _matchedIds.contains(q.id),
-                            color: _tileColor(context, q.id!, isTerm: false),
-                            onTap: () => _tapDefinition(q),
-                          ),
-                      ],
+                  // Lines only ever get added for confirmed-correct pairs
+                  // (see _attemptMatch) - a wrong tap never reaches
+                  // _recomputeLines, so it simply never connects.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _MatchLinesPainter(_matchLines),
+                      ),
                     ),
                   ),
                 ],
@@ -278,6 +379,56 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> {
   }
 }
 
+class _MatchLine {
+  final Offset start;
+  final Offset end;
+  const _MatchLine(this.start, this.end);
+}
+
+class _MatchLinesPainter extends CustomPainter {
+  final List<_MatchLine> lines;
+  const _MatchLinesPainter(this.lines);
+
+  static const _arrowheadLength = 9.0;
+  static const _arrowheadSpread = 0.5; // radians
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..color = Colors.green.shade700
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    final headPaint = Paint()
+      ..color = Colors.green.shade700
+      ..style = PaintingStyle.fill;
+
+    for (final line in lines) {
+      canvas.drawLine(line.start, line.end, linePaint);
+
+      final angle = (line.end - line.start).direction;
+      final p1 = line.end -
+          Offset(cos(angle - _arrowheadSpread), sin(angle - _arrowheadSpread)) *
+              _arrowheadLength;
+      final p2 = line.end -
+          Offset(cos(angle + _arrowheadSpread), sin(angle + _arrowheadSpread)) *
+              _arrowheadLength;
+      canvas.drawPath(
+        Path()
+          ..moveTo(line.end.dx, line.end.dy)
+          ..lineTo(p1.dx, p1.dy)
+          ..lineTo(p2.dx, p2.dy)
+          ..close(),
+        headPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MatchLinesPainter oldDelegate) =>
+      !identical(oldDelegate.lines, lines);
+}
+
 class _MatchTile extends StatelessWidget {
   final String text;
   final bool locked;
@@ -285,6 +436,7 @@ class _MatchTile extends StatelessWidget {
   final VoidCallback onTap;
 
   const _MatchTile({
+    super.key,
     required this.text,
     required this.locked,
     required this.color,

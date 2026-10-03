@@ -54,11 +54,12 @@ class PreparedImport {
 /// isolate via compute() so a large file doesn't freeze the UI thread.
 class ContentImportService {
   /// Survival mode is lives-based and ends when the pool runs out, so a
-  /// short pool makes the mode unplayable - it needs at least this many
-  /// questions to be a real round. Quiz and Survival both draw from the
-  /// full MCQ pool (see DatabaseHelper.getQuestionsWithProgress), so this
-  /// is simply a floor on the MCQ count a student is allowed to pick.
-  static const int minSurvivalQuestions = 10;
+  /// short pool makes the mode unplayable - it needs at least 10 questions
+  /// *at whichever difficulty the student picks* to be a real round, not
+  /// just 10 in total. save() spreads the kept questions evenly across the
+  /// 4 difficulty tiers (see QuestionGenerator.selectBalancedByDifficulty),
+  /// so guaranteeing 10 per tier means flooring the total at 4x that.
+  static const int minSurvivalQuestions = 40;
 
   /// Generates everything the material can support, without saving. The
   /// expensive half of the import - the caller then asks the student how
@@ -67,10 +68,12 @@ class ContentImportService {
   static Future<PreparedImport> prepare({
     String? filePath,
     String? pastedNotes,
+    void Function(int page, int totalPages)? onOcrPage,
   }) async {
     final rawText = await _extractRawText(
       filePath: filePath,
       pastedNotes: pastedNotes,
+      onOcrPage: onOcrPage,
     );
 
     final mcqMaps = await compute(generateQuestionsIsolate, rawText);
@@ -113,6 +116,12 @@ class ContentImportService {
     required int questionCount,
   }) async {
     final keep = questionCount.clamp(0, prepared.maxQuestions);
+    // Spread across difficulty tiers rather than the first `keep` in
+    // document order - see QuestionGenerator.selectBalancedByDifficulty for
+    // why a plain .take(keep) would risk leaving some difficulty level with
+    // no questions at all.
+    final selected =
+        QuestionGenerator.selectBalancedByDifficulty(prepared.mcqMaps, keep);
 
     final db = DatabaseHelper.instance;
     final moduleId = await db.insertModule(Module(
@@ -122,8 +131,7 @@ class ContentImportService {
     ));
 
     final questions = <Question>[
-      for (final g in prepared.mcqMaps.take(keep))
-        _toMcqQuestion(g, moduleId),
+      for (final g in selected) _toMcqQuestion(g, moduleId),
       for (final pairMap in prepared.pairMaps) _toPairQuestion(pairMap, moduleId),
     ];
 
@@ -170,9 +178,7 @@ class ContentImportService {
       // in BOTH Quiz and Survival, so this is just a label now.
       gameMode: 'quiz',
       questionType: 'mcq',
-      // Unreviewed until a student confirms/edits it in
-      // ReviewQuestionsScreen - see getQuestionsWithProgress.
-      verified: false,
+      difficulty: g['difficulty'] as String? ?? 'medium',
     );
   }
 
@@ -190,15 +196,14 @@ class ContentImportService {
       theory: sourceSentence,
       gameMode: 'matching',
       questionType: 'pair',
-      // Unreviewed until a student confirms/edits it in
-      // ReviewQuestionsScreen - see getQuestionsWithProgress.
-      verified: false,
+      difficulty: pair['difficulty'] as String? ?? 'medium',
     );
   }
 
   static Future<String> _extractRawText({
     String? filePath,
     String? pastedNotes,
+    void Function(int page, int totalPages)? onOcrPage,
   }) async {
     final hasFile = filePath != null && filePath.isNotEmpty;
     final hasNotes = pastedNotes != null && pastedNotes.trim().isNotEmpty;
@@ -216,7 +221,16 @@ class ContentImportService {
       }
       switch (p.extension(filePath).toLowerCase()) {
         case '.pdf':
-          text = await compute(PdfExtractor.extractText, filePath);
+          // Not run via compute() - unlike PPTX extraction below, this can
+          // fall back to OCR (pdfx + Tesseract), and those are native
+          // plugins that need the main isolate's platform channel. A
+          // fully-digital PDF (the common case) never touches OCR at all,
+          // so this stays fast; only scanned/photographed pages pay the
+          // OCR cost, with onOcrPage reporting progress for the UI.
+          text = await PdfExtractor.extractTextWithOcrFallback(
+            filePath,
+            onOcrPage: onOcrPage,
+          );
           break;
         case '.pptx':
           text = await compute(PptxExtractor.extractText, filePath);
@@ -232,7 +246,11 @@ class ContentImportService {
 
     if (text.trim().isEmpty) {
       throw ContentImportException(
-        'No readable text was found in the provided material.',
+        hasFile
+            ? 'No readable text was found in this file, even after trying '
+                'OCR on scanned-looking pages. It may be a poor-quality '
+                'scan - try a clearer copy, or paste the notes instead.'
+            : 'No readable text was found in the provided material.',
       );
     }
     return text;

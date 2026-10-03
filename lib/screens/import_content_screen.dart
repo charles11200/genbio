@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../services/content_import_service.dart';
-import 'review_questions_screen.dart';
 
 /// Lets a student turn a PDF, PPTX, or pasted notes into a new playable
 /// Module. No login/admin gate - this is the only way any Module gets
@@ -26,6 +25,8 @@ class _ImportContentScreenState extends State<ImportContentScreen> {
   String? _pickedFilePath;
   bool _isImporting = false;
   String? _errorMessage;
+  int? _ocrPage;
+  int? _ocrTotalPages;
 
   @override
   void dispose() {
@@ -60,12 +61,21 @@ class _ImportContentScreenState extends State<ImportContentScreen> {
     setState(() {
       _isImporting = true;
       _errorMessage = null;
+      _ocrPage = null;
+      _ocrTotalPages = null;
     });
 
     try {
       final prepared = await ContentImportService.prepare(
         filePath: _pickedFilePath,
         pastedNotes: _pickedFilePath == null ? _notesController.text : null,
+        onOcrPage: (page, totalPages) {
+          if (!mounted) return;
+          setState(() {
+            _ocrPage = page;
+            _ocrTotalPages = totalPages;
+          });
+        },
       );
       if (!mounted) return;
 
@@ -81,23 +91,13 @@ class _ImportContentScreenState extends State<ImportContentScreen> {
         return;
       }
 
-      final moduleId = await ContentImportService.save(
+      await ContentImportService.save(
         prepared: prepared,
         moduleTitle: _titleController.text.trim(),
         questionCount: chosenCount,
       );
       if (!mounted) return;
-      // Hand off to review before this pops - see ReviewQuestionsScreen's
-      // docstring for why every way of leaving it (Confirm/back/system
-      // gesture) ends up popping true, so this line always runs with a
-      // real result rather than hanging.
-      final reviewed = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => ReviewQuestionsScreen(moduleId: moduleId),
-        ),
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop(reviewed ?? false);
+      Navigator.of(context).pop(true);
     } on ContentImportException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (_) {
@@ -105,7 +105,13 @@ class _ImportContentScreenState extends State<ImportContentScreen> {
         () => _errorMessage = 'Something went wrong. Please try again.',
       );
     } finally {
-      if (mounted) setState(() => _isImporting = false);
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+          _ocrPage = null;
+          _ocrTotalPages = null;
+        });
+      }
     }
   }
 
@@ -200,11 +206,15 @@ class _ImportContentScreenState extends State<ImportContentScreen> {
               ),
               if (_isImporting) ...[
                 const SizedBox(height: 12),
-                const Text(
-                  'Extracting text and generating questions - this can '
-                  'take a moment for longer files.',
+                Text(
+                  _ocrPage != null
+                      ? 'This looks like a scanned page - reading it with '
+                          'OCR (page $_ocrPage of $_ocrTotalPages). This '
+                          'can take a while for long scanned files.'
+                      : 'Extracting text and generating questions - this can '
+                          'take a moment for longer files.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontStyle: FontStyle.italic),
+                  style: const TextStyle(fontStyle: FontStyle.italic),
                 ),
               ],
             ],
@@ -233,8 +243,10 @@ class _QuestionCountDialogState extends State<_QuestionCountDialog> {
 
   int get _max => widget.prepared.maxQuestions;
 
-  /// Survival needs a real pool to be playable at all, so the slider
-  /// floors at 10 whenever the material can supply that many. When it
+  /// Survival needs a real pool to be playable at every difficulty, not
+  /// just in total - questions get spread across 4 tiers (see
+  /// ContentImportService.minSurvivalQuestions), so the slider floors at
+  /// that combined minimum whenever the material can supply it. When it
   /// can't, the floor drops to whatever exists (and the note below warns
   /// that Survival will be short) rather than blocking the import.
   int get _min => _max < ContentImportService.minSurvivalQuestions
@@ -284,14 +296,18 @@ class _QuestionCountDialogState extends State<_QuestionCountDialog> {
             const SizedBox(height: 8),
           if (_belowSurvivalMinimum)
             Text(
+              'Every difficulty level pulls from different questions, so '
               'Survival Mode needs at least '
-              '${ContentImportService.minSurvivalQuestions} questions - '
-              'import longer material to unlock a full round.',
+              '${ContentImportService.minSurvivalQuestions} questions total '
+              'for a full round at any difficulty - import longer material '
+              'to unlock one.',
               style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
             )
           else
             Text(
-              'Minimum $_min, so Survival Mode always has a full round.',
+              'Minimum $_min, spread across Easy/Medium/Hard/Very Hard, so '
+              'Survival Mode has a full round no matter which difficulty '
+              'you pick.',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
         ],

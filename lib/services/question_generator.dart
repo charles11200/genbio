@@ -2,32 +2,7 @@ import 'dart:math';
 
 import 'text_quality_filter.dart';
 
-/// Offline Question Generator (Flutter/Dart version)
-/// -----------------------------------------------------
-/// Deliberately rule-based, not a wrapped AI model:
-///  - explainable step-by-step in your capstone defense
-///  - no model file to bundle, no inference cost on a student's phone
-///  - fully offline, zero network calls
-///
-/// How it works:
-///  1. Split extracted text (from PDF/PPTX) into sentences.
-///  2. Keep sentences of reasonable length (not headers, not fragments)
-///     AND that pass GrammarValidator.isPlausibleSentence - see
-///     text_quality_filter.dart for why this uses a small closed
-///     dictionary of English grammar words instead of a general
-///     wordlist (a general dictionary would reject real Biology terms).
-///  3. Detect a "Subject is/are Definition" pattern -> definition question.
-///     Otherwise, fall back to a fill-in-the-blank on the sentence's
-///     longest capitalized/noun-like phrase.
-///  4. Build wrong-answer choices ("distractors") from other candidate
-///     terms found elsewhere in the SAME document, so distractors stay
-///     topically relevant instead of being random junk.
-///  5. generateTermDefinitionPairs() builds term/definition pairs (no MCQ
-///     distractors) for the Matching game mode, which needs pairs to
-///     match rather than 4-choice questions.
-///
-/// NOTE: every generated question is meant to be reviewed before it
-/// becomes playable. The app never silently overwrites bad content.
+
 class GeneratedQuestion {
   final String questionText;
   final String correctAnswer;
@@ -52,6 +27,13 @@ class GeneratedQuestion {
   // based re-ranking pass in ContentImportService can format its
   // replacement choices the same way.
   final Map<String, String> termDefinitions;
+  // easy | medium | hard | veryHard - set by _assignDifficulties after
+  // every question for a document has been generated, not fixed at
+  // construction time (that pass needs to see every question at once to
+  // rank them against each other). Mutable rather than final for exactly
+  // that reason. See Difficulty in difficulty.dart for how this is used
+  // to filter each game mode's pool.
+  String difficulty;
 
   GeneratedQuestion({
     required this.questionText,
@@ -62,6 +44,7 @@ class GeneratedQuestion {
     required this.distractorCandidates,
     required this.isDefinitionStyle,
     required this.termDefinitions,
+    this.difficulty = 'medium',
   });
 }
 
@@ -70,11 +53,14 @@ class TermDefinitionPair {
   final String term;
   final String definition;
   final String sourceSentence;
+  // See GeneratedQuestion.difficulty - same idea, same reason it's mutable.
+  String difficulty;
 
   TermDefinitionPair({
     required this.term,
     required this.definition,
     required this.sourceSentence,
+    this.difficulty = 'medium',
   });
 }
 
@@ -169,7 +155,79 @@ class QuestionGenerator {
         results.add(question);
       }
     }
+    _assignDifficulties(
+      results,
+      complexity: _questionComplexity,
+      setDifficulty: (q, tier) => q.difficulty = tier,
+    );
     return results;
+  }
+
+  /// Tiers a list of generated items into easy/medium/hard/veryHard by
+  /// [complexity], approximated as word count - longer, more involved
+  /// wording takes more careful reading to answer correctly. This is a
+  /// deliberately simple, explainable proxy rather than anything judged by
+  /// the embedding model: difficulty needs to be assignable before
+  /// distractor re-ranking even runs, and to stay deterministic (see
+  /// _stableIndex) for the same reason question phrasing does.
+  ///
+  /// Bucketed by RANK (quartiles of the sorted list), not by a fixed
+  /// word-count threshold, so any material - long-winded or terse - gets a
+  /// real, non-empty split across all four levels instead of the threshold
+  /// missing entirely for unusually short or long source text.
+  static void _assignDifficulties<T>(
+    List<T> items, {
+    required int Function(T) complexity,
+    required void Function(T, String) setDifficulty,
+  }) {
+    if (items.isEmpty) return;
+    final byComplexity = List<T>.of(items)
+      ..sort((a, b) => complexity(a).compareTo(complexity(b)));
+    final n = byComplexity.length;
+    for (var i = 0; i < n; i++) {
+      final tierIndex = (i * _difficultyTiers.length) ~/ n;
+      setDifficulty(
+        byComplexity[i],
+        _difficultyTiers[tierIndex.clamp(0, _difficultyTiers.length - 1)],
+      );
+    }
+  }
+
+  static const _difficultyTiers = ['easy', 'medium', 'hard', 'veryHard'];
+
+  static int _questionComplexity(GeneratedQuestion q) =>
+      '${q.questionText} ${q.correctAnswer}'.split(RegExp(r'\s+')).length;
+
+  static int _pairComplexity(TermDefinitionPair p) =>
+      '${p.term} ${p.definition}'.split(RegExp(r'\s+')).length;
+
+  /// Picks [keep] items from [items] spread as evenly as possible across
+  /// their `difficulty` value, rather than the first [keep] in list order.
+  /// Without this, a student choosing fewer than the material's full
+  /// capacity (see the import count picker) could end up with a module
+  /// that's mostly Easy questions and none at Hard - silently making that
+  /// difficulty level unplayable even though the source material actually
+  /// supported it. Order within each tier is preserved from [items].
+  static List<Map<String, dynamic>> selectBalancedByDifficulty(
+    List<Map<String, dynamic>> items,
+    int keep,
+  ) {
+    if (keep >= items.length) return items;
+    if (keep <= 0) return [];
+    final byTier = {
+      for (final t in _difficultyTiers)
+        t: items.where((m) => m['difficulty'] == t).toList(),
+    };
+    final selected = <Map<String, dynamic>>[];
+    var remaining = keep;
+    for (var i = 0; i < _difficultyTiers.length; i++) {
+      final tierItems = byTier[_difficultyTiers[i]]!;
+      final tiersLeft = _difficultyTiers.length - i;
+      final take = (remaining / tiersLeft).ceil().clamp(0, tierItems.length);
+      selected.addAll(tierItems.take(take));
+      remaining -= take;
+    }
+    return selected;
   }
 
   /// Term/definition pairs for the Matching game mode - built only from
@@ -207,6 +265,11 @@ class QuestionGenerator {
         sourceSentence: sentence,
       ));
     }
+    _assignDifficulties(
+      pairs,
+      complexity: _pairComplexity,
+      setDifficulty: (p, tier) => p.difficulty = tier,
+    );
     return pairs;
   }
 
@@ -465,6 +528,7 @@ List<Map<String, dynamic>> generateQuestionsIsolate(String rawText) {
     'distractorCandidates': g.distractorCandidates,
     'isDefinitionStyle': g.isDefinitionStyle,
     'termDefinitions': g.termDefinitions,
+    'difficulty': g.difficulty,
   })
       .toList();
 }
@@ -476,6 +540,7 @@ List<Map<String, dynamic>> generateTermDefinitionPairsIsolate(
     'term': p.term,
     'definition': p.definition,
     'sourceSentence': p.sourceSentence,
+    'difficulty': p.difficulty,
   })
       .toList();
 }

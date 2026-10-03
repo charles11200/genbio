@@ -14,6 +14,10 @@ class ResultsScreen extends StatelessWidget {
   /// Quiz/Matching, which always finish by exhausting their question set.
   final bool? completed;
 
+  /// Matching-only: wrong-pair attempts across the whole game. Null for
+  /// Quiz/Survival, where score-vs-totalItems already is the wrong count.
+  final int? mistakes;
+
   const ResultsScreen({
     super.key,
     required this.gameMode,
@@ -21,6 +25,7 @@ class ResultsScreen extends StatelessWidget {
     required this.score,
     required this.totalItems,
     this.completed,
+    this.mistakes,
   });
 
   String get _headline {
@@ -53,6 +58,13 @@ class ResultsScreen extends StatelessWidget {
                 '${percent.toStringAsFixed(1)}%',
                 style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
               ),
+              if (mistakes != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '$mistakes wrong ${mistakes == 1 ? 'match' : 'matches'} along the way',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                ),
+              ],
               const SizedBox(height: 32),
               FilledButton(
                 onPressed: () =>

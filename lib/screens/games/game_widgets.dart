@@ -43,18 +43,28 @@ class ChoiceButton extends StatelessWidget {
 
 class EmptyPoolMessage extends StatelessWidget {
   final String gameMode;
-  const EmptyPoolMessage({super.key, required this.gameMode});
+  // Shown when given, since an empty pool now more often means "none at
+  // this difficulty" than "none at all" - see
+  // DatabaseHelper.getQuestionsWithProgress.
+  final String? difficultyLabel;
+
+  const EmptyPoolMessage({
+    super.key,
+    required this.gameMode,
+    this.difficultyLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final message = difficultyLabel == null
+        ? 'This module has no $gameMode questions yet. Import more '
+            'material first.'
+        : 'This module has no $difficultyLabel $gameMode questions yet. '
+            'Try a different difficulty, or import more material.';
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text(
-          'This module has no $gameMode questions yet. Import more '
-          'material first.',
-          textAlign: TextAlign.center,
-        ),
+        child: Text(message, textAlign: TextAlign.center),
       ),
     );
   }

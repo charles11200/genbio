@@ -7,6 +7,7 @@ import '../../data/models.dart';
 import '../../services/adaptive_learning_service.dart';
 import '../../services/difficulty.dart';
 import '../../services/question_pool_service.dart';
+import '../../services/sound_service.dart';
 import 'game_widgets.dart';
 import 'results_screen.dart';
 
@@ -57,13 +58,20 @@ class _SurvivalGameScreenState extends State<SurvivalGameScreen> {
   }
 
   Future<void> _load() async {
-    final pool = await QuestionPoolService.buildPool(widget.moduleId, 'survival');
+    final pool = await QuestionPoolService.buildPool(
+      widget.moduleId,
+      'survival',
+      difficulty: widget.difficulty.dbValue,
+    );
     if (!mounted) return;
     setState(() {
       _questions = pool;
       _loading = false;
     });
-    if (pool.isNotEmpty) _startQuestionTimer();
+    if (pool.isNotEmpty) {
+      SoundService.playStart();
+      _startQuestionTimer();
+    }
   }
 
   void _startQuestionTimer() {
@@ -129,6 +137,14 @@ class _SurvivalGameScreenState extends State<SurvivalGameScreen> {
   }
 
   Future<void> _finish() async {
+    // Survival already has a real win/lose state - pool cleared with lives
+    // to spare vs. lives run out - so that decides the sound directly,
+    // unlike Quiz/Matching which fall back to a score threshold.
+    if (_lives > 0) {
+      SoundService.playWin();
+    } else {
+      SoundService.playLose();
+    }
     await DatabaseHelper.instance.insertAttempt(Attempt(
       gameMode: 'survival',
       moduleId: widget.moduleId,
@@ -154,7 +170,10 @@ class _SurvivalGameScreenState extends State<SurvivalGameScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _questions.isEmpty
-              ? const EmptyPoolMessage(gameMode: 'survival')
+              ? EmptyPoolMessage(
+                  gameMode: 'survival',
+                  difficultyLabel: widget.difficulty.label,
+                )
               : _buildGame(context),
     );
   }

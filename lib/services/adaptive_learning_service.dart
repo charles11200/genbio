@@ -54,13 +54,14 @@ class AdaptiveLearningService {
     await db.saveQuestionProgress(updated);
   }
 
-  /// Builds a game session for [moduleId]/[gameMode]: up to [limit]
-  /// questions, weighted so ones the student struggles with show up more
-  /// often, without ever completely excluding well-known questions.
+  /// Builds a game session for [moduleId]/[gameMode]/[difficulty]: up to
+  /// [limit] questions, weighted so ones the student struggles with show
+  /// up more often, without ever completely excluding well-known
+  /// questions.
   static Future<List<Question>> buildSession(
-      int moduleId, String gameMode, int limit) async {
+      int moduleId, String gameMode, String difficulty, int limit) async {
     final rows = await DatabaseHelper.instance
-        .getQuestionsWithProgress(moduleId, gameMode);
+        .getQuestionsWithProgress(moduleId, gameMode, difficulty);
     if (rows.isEmpty) return [];
     final pool = [
       for (final r in rows)

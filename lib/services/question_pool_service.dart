@@ -12,17 +12,23 @@ import 'adaptive_learning_service.dart';
 /// more likely to be picked. This is the one place all three game modes
 /// go to get their questions, so that guarantee lives in a single spot.
 class QuestionPoolService {
-  /// The question/pair pool for [gameMode] in [moduleId], no-repeat
-  /// shuffled and weighted toward questions the student is still weak on.
-  /// Pass [limit] to cap a rolling draw (Quiz/Survival); omit it to pull
-  /// the module's entire pool for that mode (Matching, which needs every
-  /// pair up front to split into rounds).
+  /// The question/pair pool for [gameMode]/[difficulty] in [moduleId],
+  /// no-repeat shuffled and weighted toward questions the student is still
+  /// weak on. Pass [limit] to cap a rolling draw (Quiz/Survival); omit it
+  /// to pull the module's entire pool for that mode (Matching, which needs
+  /// every pair up front to split into rounds).
   static Future<List<Question>> buildPool(
     int moduleId,
     String gameMode, {
+    required String difficulty,
     int limit = 1 << 30,
   }) {
-    return AdaptiveLearningService.buildSession(moduleId, gameMode, limit);
+    return AdaptiveLearningService.buildSession(
+      moduleId,
+      gameMode,
+      difficulty,
+      limit,
+    );
   }
 
   /// Splits a full Matching-mode pool into fixed-size rounds (5 pairs by
