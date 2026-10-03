@@ -1,0 +1,23 @@
+name: flutter_tesseract_ocr
+description: >
+  Vendored, Android-only copy of pub.dev's flutter_tesseract_ocr 0.4.31,
+  with its broken Android Gradle config fixed. See README.md.
+version: 0.4.31
+publish_to: 'none'
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=1.12.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: io.paratoner.flutter_tesseract_ocr
+        pluginClass: FlutterTesseractOcrPlugin

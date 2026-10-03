@@ -1,0 +1,39 @@
+group 'io.paratoner.flutter_tesseract_ocr'
+version '1.0'
+
+// Vendored from pub.dev's flutter_tesseract_ocr 0.4.31 (see ../README.md for
+// why) with one change: the upstream file opened with its own
+// `buildscript { repositories { google(); jcenter() } ... classpath
+// 'com.android.tools.build:gradle:7.1.2' }` block. jcenter() was shut down
+// years ago and modern Gradle no longer even has that repository method, so
+// that block failed immediately - and it was redundant anyway, since
+// Flutter's root settings.gradle already applies the Android Gradle Plugin
+// centrally. Deleting it (and letting this module use that already-applied
+// plugin) is the whole fix; everything below this line is unchanged
+// upstream source.
+rootProject.allprojects {
+    repositories {
+        flatDir {
+           dirs project(':flutter_tesseract_ocr').file('libs')
+        }
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace "io.paratoner.flutter_tesseract_ocr"
+    compileSdkVersion 34
+
+    defaultConfig {
+        minSdkVersion 21
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+}
+
+dependencies {
+    api(name: 'tesseract4android-release', ext: 'aar')
+}
