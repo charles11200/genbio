@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+# Gradle's own report/output dir - regenerated on every build, and one of
+# its reports (problems-report.html) was previously committed by mistake.
+/android/build/
+
+# Claude Code local state - per-machine permission settings and scratch
+# git worktrees (full copies of the project, each with a .git file that
+# points at an absolute path on the machine that made it). Never shared:
+# a committed worktree shows up as a broken submodule for everyone else.
+.claude/
